@@ -28,6 +28,7 @@ from src.observability.logger import get_logger
 # Libs layer imports
 from src.libs.loader.file_integrity import SQLiteIntegrityChecker
 from src.libs.loader.pdf_loader import PdfLoader
+from src.libs.loader.txt_loader import TxtLoader
 from src.libs.embedding.embedding_factory import EmbeddingFactory
 from src.libs.vector_store.vector_store_factory import VectorStoreFactory
 
@@ -141,12 +142,9 @@ class IngestionPipeline:
         self.integrity_checker = SQLiteIntegrityChecker(db_path=str(resolve_path("data/db/ingestion_history.db")))
         logger.info("  ✓ FileIntegrityChecker initialized")
         
-        # Stage 2: Loader
-        self.loader = PdfLoader(
-            extract_images=True,
-            image_storage_dir=str(resolve_path(f"data/images/{collection}"))
-        )
-        logger.info("  ✓ PdfLoader initialized")
+        # Stage 2: Loader (selected per-file in run())
+        self.loader = None
+        logger.info("  ✓ Loader will be initialized in run()")
         
         # Stage 3: Chunker
         self.chunker = DocumentChunker(settings)
@@ -225,6 +223,24 @@ class IngestionPipeline:
         logger.info(f"Starting Ingestion Pipeline for: {file_path}")
         logger.info(f"Collection: {self.collection}")
         logger.info(f"=" * 60)
+
+        # Select loader based on file extension
+        suffix = file_path.suffix.lower()
+        if suffix == ".txt":
+            self.loader = TxtLoader()
+            logger.info("  Using TxtLoader for .txt file")
+        elif suffix == ".pdf":
+            self.loader = PdfLoader(
+                extract_images=True,
+                image_storage_dir=str(resolve_path(f"data/images/{self.collection}")),
+            )
+            logger.info("  Using PdfLoader for .pdf file")
+        else:
+            logger.warning(f"Unsupported file type '{suffix}', trying PdfLoader as fallback")
+            self.loader = PdfLoader(
+                extract_images=True,
+                image_storage_dir=str(resolve_path(f"data/images/{self.collection}")),
+            )
         
         try:
             # ─────────────────────────────────────────────────────────────
