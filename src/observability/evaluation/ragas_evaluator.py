@@ -228,6 +228,12 @@ class RagasEvaluator(BaseEvaluator):
             )
         elif provider == "openai":
             llm_client = AsyncOpenAI(api_key=llm_cfg.api_key)
+        elif provider == "deepseek":
+            deepseek_base = getattr(llm_cfg, "base_url", None) or "https://api.deepseek.com"
+            llm_client = AsyncOpenAI(
+                api_key=llm_cfg.api_key,
+                base_url=deepseek_base,
+            )
         else:
             raise ValueError(
                 f"Unsupported LLM provider for Ragas: '{provider}'. "
@@ -255,6 +261,19 @@ class RagasEvaluator(BaseEvaluator):
             )
         elif emb_provider == "openai":
             emb_client = AsyncOpenAI(api_key=emb_cfg.api_key)
+        elif emb_provider == "ollama":
+            ollama_base = getattr(emb_cfg, "base_url", None) or "http://localhost:11434"
+            # Ollama v0.5+ supports OpenAI-compatible endpoint
+            emb_client = AsyncOpenAI(
+                api_key="ollama",  # Ollama doesn't need a real key
+                base_url=f"{ollama_base}/v1",
+            )
+        elif emb_provider == "deepseek":
+            deepseek_base = getattr(emb_cfg, "base_url", None) or "https://api.deepseek.com"
+            emb_client = AsyncOpenAI(
+                api_key=emb_cfg.api_key,
+                base_url=deepseek_base,
+            )
         else:
             raise ValueError(
                 f"Unsupported embedding provider for Ragas: '{emb_provider}'. "

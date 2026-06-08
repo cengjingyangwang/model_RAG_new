@@ -61,8 +61,12 @@ class DeepSeekLLM(BaseLLM):
         self.default_temperature = settings.llm.temperature
         self.default_max_tokens = settings.llm.max_tokens
         
-        # API key: explicit > env var
-        self.api_key = api_key or os.environ.get("DEEPSEEK_API_KEY")
+        # API key: explicit > settings > env var
+        self.api_key = (
+            api_key
+            or getattr(settings.llm, "api_key", None)
+            or os.environ.get("DEEPSEEK_API_KEY")
+        )
         if not self.api_key:
             raise ValueError(
                 "DeepSeek API key not provided. Set DEEPSEEK_API_KEY environment variable "
