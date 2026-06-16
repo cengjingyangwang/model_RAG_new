@@ -7,7 +7,7 @@
 llm:
   provider: "deepseek"  # Options: openai, azure, deepseek, ollama
   model: "deepseek-chat"
-  api_key: "sk-2f4e796deee5439f87fda5d0e6915cad"
+  api_key: ""
   base_url: "https://api.deepseek.com"
   temperature: 0.0
   max_tokens: 4096

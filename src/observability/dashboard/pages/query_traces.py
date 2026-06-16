@@ -19,33 +19,87 @@ from src.observability.dashboard.services.trace_service import TraceService
 logger = logging.getLogger(__name__)
 
 
+def _run_query(query_text: str) -> Optional[Dict[str, Any]]:
+    """Run a query through the pipeline and return result chunks."""
+    try:
+        from src.core.settings import load_settings
+        from src.core.query_engine.hybrid_search import create_hybrid_search
+        from src.core.query_engine.query_processor import QueryProcessor
+        from src.core.query_engine.dense_retriever import create_dense_retriever
+        from src.core.query_engine.sparse_retriever import create_sparse_retriever
+        from src.core.query_engine.reranker import create_core_reranker
+        from src.ingestion.storage.bm25_indexer import BM25Indexer
+        from src.libs.embedding.embedding_factory import EmbeddingFactory
+        from src.libs.vector_store.vector_store_factory import VectorStoreFactory
+        from src.core.settings import resolve_path
+
+        settings = load_settings()
+        collection = "default"
+        top_k = 10
+
+        vector_store = VectorStoreFactory.create(settings, collection_name=collection)
+        embedding_client = EmbeddingFactory.create(settings)
+        dense_retriever = create_dense_retriever(settings=settings, embedding_client=embedding_client, vector_store=vector_store)
+        bm25_indexer = BM25Indexer(index_dir=str(resolve_path(f"data/db/bm25/{collection}")))
+        sparse_retriever = create_sparse_retriever(settings=settings, bm25_indexer=bm25_indexer, vector_store=vector_store)
+        sparse_retriever.default_collection = collection
+        query_processor = QueryProcessor()
+        hybrid_search = create_hybrid_search(settings=settings, query_processor=query_processor, dense_retriever=dense_retriever, sparse_retriever=sparse_retriever)
+
+        reranker = create_core_reranker(settings=settings)
+        initial_top_k = top_k * 2 if reranker.is_enabled else top_k
+        results = hybrid_search.search(query=query_text, top_k=initial_top_k)
+        results = results if isinstance(results, list) else results.results
+
+        if reranker.is_enabled and results:
+            rerank_result = reranker.rerank(query=query_text, results=results, top_k=top_k)
+            results = rerank_result.results
+
+        return {"results": results, "count": len(results), "query": query_text}
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).exception("Query failed")
+        return {"error": str(exc), "query": query_text}
+
+
 def render() -> None:
     """Render the Query Traces page."""
     st.header("🔎 Query Traces")
 
+    # ── Query input ────────────────────────────────────────────────
+    with st.container():
+        query_input = st.text_input(
+            "输入问题，实时检索知识库",
+            value="",
+            key="qt_query_input",
+            placeholder="例：RAG 的检索流程是什么",
+        )
+        query_clicked = st.button("🔍 查询", key="qt_query_btn", type="primary")
+
+    if query_clicked and query_input.strip():
+        with st.spinner("🔍 正在检索..."):
+            result = _run_query(query_input.strip())
+        if "error" in result:
+            st.error(f"查询失败: {result['error']}")
+        elif result.get("results"):
+            st.success(f"✅ 找到 {result['count']} 条相关结果")
+            for i, r in enumerate(result["results"]):
+                score = getattr(r, "score", r.get("score", 0)) if isinstance(r, dict) else r.score
+                text = getattr(r, "text", r.get("text", "")) if isinstance(r, dict) else r.text
+                source = getattr(r, "source", r.get("source", "")) if isinstance(r, dict) else r.metadata.get("source_path", "")
+                with st.expander(f"#{i+1}  score={score:.4f}", expanded=i == 0):
+                    st.caption(f"来源: {source}")
+                    st.markdown(text[:500] + ("…" if len(text) > 500 else ""))
+        else:
+            st.warning("未找到相关结果")
+
+    st.divider()
+
+    # ── Query history ──────────────────────────────────────────────
+    st.subheader("📋 历史查询记录")
+
     svc = TraceService()
     traces = svc.list_traces(trace_type="query")
-
-    if not traces:
-        st.info("No query traces recorded yet. Run a query first!")
-        return
-
-    # ── Keyword filter ─────────────────────────────────────────────
-    keyword = st.text_input(
-        "Search by query keyword",
-        value="",
-        key="qt_keyword",
-    )
-    if keyword.strip():
-        kw = keyword.strip().lower()
-        traces = [
-            t
-            for t in traces
-            if kw in str(t.get("metadata", {})).lower()
-            or kw in str(t.get("stages", [])).lower()
-        ]
-
-    st.subheader(f"📋 Query History ({len(traces)})")
 
     for idx, trace in enumerate(traces):
         trace_id = trace.get("trace_id", "unknown")
